@@ -1,0 +1,109 @@
+# 
+# SSO PermissionSet Assignment Template
+#
+# Note that this cloudformation template utilizes embedded Jinja2 templating and must be pre-processed by Jinja2 before submitting to CloudFormation 
+# sceptre automatically does this for us when using our homegrown sceptre-deploy pipelining tool 
+#
+AWSTemplateFormatVersion: 2010-09-09
+Description: "SSO Assignments Lambda Support Function"
+Parameters:
+  SSOInstanceId: 
+    Type: String
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal: {Service: [lambda.amazonaws.com]}
+          Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+      Policies:
+      - PolicyName: LambdaPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+              - 'sso:Get*'
+              - 'identitystore:*'
+              - 'sts:AssumeRole'
+              - 'logs:*'
+              Resource: ['*']
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          SSOInstanceId: !Ref SSOInstanceId
+
+      Code:
+        ZipFile: |
+          import cfnresponse
+          import sys
+          import time
+          from pip._internal import main
+          
+          main(['install', '-I', '-q', 'boto3', '--target', '/tmp/', '--no-cache-dir', '--disable-pip-version-check'])
+          sys.path.insert(0,'/tmp/')
+
+          import boto3
+          import json
+          import string
+          import logging
+          import os
+          from botocore.exceptions import ClientError
+
+          logging.getLogger().setLevel(logging.INFO)
+
+          def handler(event, context):
+            time.sleep(500/1000)
+            props = event['ResourceProperties']
+
+            print('Obtaining credentials.')
+            print('Searching for Group: ',props['group_name'], ' in SSOInstanceId:', os.environ['SSOInstanceId'])
+            responseData = {}
+            sso_client = boto3.client('identitystore')
+            print(dir(sso_client))
+
+            try:  
+              get_group_id_response = sso_client.get_group_id(
+                  AlternateIdentifier={
+                    'UniqueAttribute': {
+                        'AttributePath': 'displayName',
+                        'AttributeValue': props['group_name']
+                    }
+                  },
+                  IdentityStoreId=os.environ['SSOInstanceId']
+              )
+            except sso_client.exceptions.ResourceNotFoundException as e:
+              print('***Group does not exist***')
+              cfnresponse.send(event, context, cfnresponse.FAILED, responseData)
+              raise e 
+            
+            GroupId=(get_group_id_response["GroupId"])
+            responseData['GroupId'] = GroupId
+            print('GroupId for ', props['group_name'], ' is ', GroupId)
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+
+  # AssignmentFunctionParam:
+  #   Type: AWS::SSM::Parameter
+  #   Properties:
+  #     Name: !Sub "/platform/sso/permissionsets/AssignmentsFunction"
+  #     Type: String
+  #     Value: !GetAtt Function.Arn
+
+Outputs:
+  AssignmentFunction:
+    Description: The Arn of the Lambda Function
+    Value: !GetAtt Function.Arn

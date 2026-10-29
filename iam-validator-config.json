@@ -1,0 +1,8 @@
+{
+  "allow_external_principals": [
+    "111122223333"
+  ],
+  "ignore_findings": [
+    "DevRole.PASS_ROLE_WITH_STAR_IN_RESOURCE"
+  ]
+}

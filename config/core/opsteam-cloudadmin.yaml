@@ -1,0 +1,18 @@
+template:
+  type: file
+  path: core/all-accounts.py
+sceptre_role_session_duration: 7200
+dependencies:
+  - core/permission-sets.yaml
+  - core/finopsteam-billingadmin.yaml
+ignore: false
+on_failure: ROLLBACK
+
+sceptre_user_data:
+  rolearn: {{environment_variable.AWS_ROLE}}
+  SSOInstanceId: {{environment_variable.SSOINSTANCEID}}
+  SSOInstanceArn: {{environment_variable.SSOINSTANCEARN}}
+  SSMPrefix: "/platform/sso/permissionsets/org"
+  GroupName: "shared-group-02"
+  Permission: "CloudAdmin"
+  isPrivileged: "true"

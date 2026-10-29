@@ -1,0 +1,6 @@
+template:
+  type: file
+  path: core/support-functions.yaml
+on_failure: ROLLBACK
+parameters:
+  SSOInstanceId: {{environment_variable.SSOINSTANCEID}}

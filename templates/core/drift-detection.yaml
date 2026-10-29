@@ -1,0 +1,461 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation Drift Detection with Slack Notifications
+
+Parameters:
+  SlackWebhookUrl:
+    Type: String
+    NoEcho: true
+    Description: Slack incoming webhook URL
+
+  ProjectCode:
+    Type: String
+    Description: Project code to filter stacks
+
+  DriftCheckSchedule:
+    Type: String
+    Default: 'cron(0 8 * * ? *)'
+    Description: 'EventBridge cron expression for daily drift check (default: 8 AM UTC)'
+
+Resources:
+  # IAM Role for Lambda
+  DriftDetectionLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CloudFormationDriftDetection
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'cloudformation:DescribeStacks'
+                  - 'cloudformation:ListStacks'
+                  - 'cloudformation:DetectStackDrift'
+                  - 'cloudformation:DescribeStackDriftDetectionStatus'
+                Resource: '*'
+        - PolicyName: ParameterStoreAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ssm:GetParameter'
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/drift-detection/*'
+
+  # Parameter Store for Slack webhook
+  SlackWebhookParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /drift-detection/slack-webhook
+      Type: String
+      Value: !Ref SlackWebhookUrl
+      Description: Slack incoming webhook URL for drift detection alerts
+
+  # Lambda Function
+  DriftDetectionFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: cf-drift-detection
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt DriftDetectionLambdaRole.Arn
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          PROJECT_CODE: !Ref ProjectCode
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+          import urllib.request
+          import urllib.error
+          from datetime import datetime
+          from typing import Dict, List
+
+          cf_client = boto3.client('cloudformation')
+          ssm_client = boto3.client('ssm')
+          sts_client = boto3.client('sts')
+
+
+          def lambda_handler(event, context):
+              """Detect CloudFormation drift for pipeline-managed stacks and send Slack alerts"""
+
+              try:
+                  # Get Slack webhook from Parameter Store
+                  slack_webhook = get_slack_webhook()
+
+                  # Get AWS account and region
+                  account_id = sts_client.get_caller_identity()['Account']
+                  region = os.environ.get('AWS_REGION', 'ca-central-1')
+
+                  # Get project code from environment
+                  project_code = os.environ.get('PROJECT_CODE', 'aws-identity-management')
+
+                  # Get all stacks for this project
+                  managed_stacks = get_pipeline_managed_stacks(project_code)
+
+                  if not managed_stacks:
+                      print("No pipeline-managed stacks found")
+                      return {
+                          'statusCode': 200,
+                          'message': 'No stacks to check'
+                      }
+
+                  print(f"Checking {len(managed_stacks)} stacks for drift")
+                  drifted_stacks = detect_drift(managed_stacks)
+
+                  # Send Slack notification
+                  if drifted_stacks:
+                      send_slack_alert(slack_webhook, drifted_stacks, managed_stacks, account_id, region)
+                      return {
+                          'statusCode': 200,
+                          'drifted_stacks': len(drifted_stacks),
+                          'total_stacks': len(managed_stacks),
+                          'message': f'{len(drifted_stacks)} drifted stack(s) detected'
+                      }
+                  else:
+                      print(f"No drift detected in {len(managed_stacks)} stacks")
+                      send_no_drift_alert(slack_webhook, managed_stacks, account_id, region)
+                      return {
+                          'statusCode': 200,
+                          'drifted_stacks': 0,
+                          'total_stacks': len(managed_stacks),
+                          'message': 'No drift detected'
+                      }
+
+              except Exception as e:
+                  print(f"Error in drift detection: {str(e)}")
+                  # Still send Slack alert for errors
+                  try:
+                      slack_webhook = get_slack_webhook()
+                      send_error_alert(slack_webhook, str(e))
+                  except:
+                      pass
+                  raise
+
+
+          def get_slack_webhook() -> str:
+              """Retrieve Slack webhook URL from Parameter Store"""
+              try:
+                  response = ssm_client.get_parameter(
+                      Name='/drift-detection/slack-webhook',
+                      WithDecryption=True
+                  )
+                  return response['Parameter']['Value']
+              except ssm_client.exceptions.ParameterNotFound:
+                  raise Exception(
+                      "Slack webhook not found. Store it at /drift-detection/slack-webhook in Parameter Store"
+                  )
+
+
+          def get_pipeline_managed_stacks(project_code: str) -> List[str]:
+              """Get list of stacks for this project"""
+              project_stacks = []
+              all_stacks = []
+
+              paginator = cf_client.get_paginator('list_stacks')
+              page_iterator = paginator.paginate(
+                  StackStatusFilter=[
+                      'CREATE_COMPLETE',
+                      'UPDATE_COMPLETE',
+                      'UPDATE_ROLLBACK_COMPLETE'
+                  ]
+              )
+
+              for page in page_iterator:
+                  for stack_summary in page['StackSummaries']:
+                      stack_name = stack_summary['StackName']
+                      all_stacks.append(stack_name)
+
+                      try:
+                          # Check stack tags
+                          stacks = cf_client.describe_stacks(StackName=stack_name)
+                          stack = stacks['Stacks'][0]
+                          tags = {tag['Key']: tag['Value'] for tag in stack.get('Tags', [])}
+
+                          print(f"Stack: {stack_name}, Tags: {tags}")
+
+                          # Only include stacks for this project (managed by github-actions AND from this repo)
+                          if (tags.get('managed-by') == 'github-actions' and
+                              tags.get('GitHubRepository') == 'your-org/aws-identity-management'):
+                              project_stacks.append(stack_name)
+                      except cf_client.exceptions.ClientError as e:
+                          if 'does not exist' not in str(e):
+                              print(f"Error checking stack {stack_name}: {e}")
+
+              print(f"Filtering for project_code: '{project_code}'")
+              print(f"Total stacks in account: {len(all_stacks)}")
+              print(f"Matching stacks: {len(project_stacks)}")
+              return project_stacks
+
+
+          def detect_drift(stack_names: List[str]) -> List[Dict]:
+              """Detect drift for given stacks"""
+              drifted_stacks = []
+
+              for stack_name in stack_names:
+                  try:
+                      # Initiate drift detection
+                      drift_response = cf_client.detect_stack_drift(StackName=stack_name)
+                      drift_id = drift_response['StackDriftDetectionId']
+
+                      # Poll for drift detection status (with timeout)
+                      max_attempts = 60
+                      attempt = 0
+
+                      while attempt < max_attempts:
+                          try:
+                              drift_status = cf_client.describe_stack_drift_detection_status(
+                                  StackDriftDetectionId=drift_id
+                              )['StackDriftDetectionStatus']
+
+                              detection_status = drift_status['DetectionStatus']
+
+                              if detection_status == 'DETECTION_COMPLETE':
+                                  if drift_status['StackDriftStatus'] == 'DRIFTED':
+                                      drifted_stacks.append({
+                                          'name': stack_name,
+                                          'status': drift_status['StackDriftStatus'],
+                                          'drifted_resources': drift_status.get('DriftedStackResourceCount', 0),
+                                          'total_resources': drift_status.get('TotalStackResourceCount', 0),
+                                          'timestamp': drift_status['Timestamp'].isoformat()
+                                      })
+                                  break
+                              else:
+                                  attempt += 1
+                                  if attempt < max_attempts:
+                                      import time
+                                      time.sleep(1)
+                          except Exception as e:
+                              print(f"Error polling drift status for {stack_name}: {e}")
+                              break
+                  except Exception as e:
+                      print(f"Error detecting drift for {stack_name}: {e}")
+
+              return drifted_stacks
+
+
+          def send_slack_alert(webhook_url: str, drifted_stacks: List[Dict], all_stacks: List[str], account_id: str, region: str):
+              """Send Slack notification with drift detection results"""
+
+              blocks = [
+                  {
+                      "type": "header",
+                      "text": {
+                          "type": "plain_text",
+                          "text": "🚨 CloudFormation Drift Detected"
+                      }
+                  },
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"AWS Account: *{account_id}* | Region: *{region}*\n*{len(drifted_stacks)} out of {len(all_stacks)} stack(s) have drifted*"
+                      }
+                  }
+              ]
+
+              # Add drifted stacks section
+              blocks.append({
+                  "type": "section",
+                  "text": {
+                      "type": "mrkdwn",
+                      "text": "*Drifted Stacks:*"
+                  }
+              })
+
+              for stack in drifted_stacks:
+                  blocks.append({
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"• *{stack['name']}*: {stack['drifted_resources']}/{stack['total_resources']} resources drifted"
+                      }
+                  })
+
+              # Add stacks checked section
+              stacks_list = "\n".join([f"• {stack}" for stack in all_stacks])
+              blocks.append({
+                  "type": "divider"
+              })
+
+              blocks.append({
+                  "type": "section",
+                  "text": {
+                      "type": "mrkdwn",
+                      "text": f"*Stacks Checked ({len(all_stacks)}):*\n{stacks_list}"
+                  }
+              })
+
+              blocks.append({
+                  "type": "divider"
+              })
+
+              blocks.append({
+                  "type": "section",
+                  "text": {
+                      "type": "mrkdwn",
+                      "text": "_Last checked: " + datetime.now().isoformat() + "_"
+                  }
+              })
+
+              blocks.append({
+                  "type": "section",
+                  "text": {
+                      "type": "mrkdwn",
+                      "text": "Review and remediate via <https://console.aws.amazon.com/cloudformation|CloudFormation Console>"
+                  }
+              })
+
+              payload = {
+                  "blocks": blocks,
+                  "unfurl_links": False
+              }
+
+              send_to_slack(webhook_url, payload)
+
+
+          def send_no_drift_alert(webhook_url: str, all_stacks: List[str], account_id: str, region: str):
+              """Send Slack notification when no drift is detected"""
+
+              blocks = [
+                  {
+                      "type": "header",
+                      "text": {
+                          "type": "plain_text",
+                          "text": "✅ CloudFormation Drift Check Complete"
+                      }
+                  },
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"AWS Account: *{account_id}* | Region: *{region}*\nNo drift detected in {len(all_stacks)} stack(s)"
+                      }
+                  }
+              ]
+
+              # Add stacks checked section
+              stacks_list = "\n".join([f"• {stack}" for stack in all_stacks])
+              blocks.append({
+                  "type": "divider"
+              })
+
+              blocks.append({
+                  "type": "section",
+                  "text": {
+                      "type": "mrkdwn",
+                      "text": f"*Stacks Checked ({len(all_stacks)}):*\n{stacks_list}"
+                  }
+              })
+
+              blocks.append({
+                  "type": "divider"
+              })
+
+              blocks.append({
+                  "type": "section",
+                  "text": {
+                      "type": "mrkdwn",
+                      "text": "_Last checked: " + datetime.now().isoformat() + "_"
+                  }
+              })
+
+              payload = {
+                  "blocks": blocks,
+                  "unfurl_links": False
+              }
+
+              send_to_slack(webhook_url, payload)
+
+
+          def send_error_alert(webhook_url: str, error_message: str):
+              """Send Slack alert for drift detection errors"""
+
+              blocks = [
+                  {
+                      "type": "header",
+                      "text": {
+                          "type": "plain_text",
+                          "text": "⚠️ Drift Detection Error"
+                      }
+                  },
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"*Error:* {error_message}"
+                      }
+                  }
+              ]
+
+              payload = {
+                  "blocks": blocks,
+                  "unfurl_links": False
+              }
+
+              send_to_slack(webhook_url, payload)
+
+
+          def send_to_slack(webhook_url: str, payload: dict):
+              """Send message to Slack using urllib"""
+              try:
+                  data = json.dumps(payload).encode('utf-8')
+                  request = urllib.request.Request(
+                      webhook_url,
+                      data=data,
+                      headers={'Content-Type': 'application/json'}
+                  )
+                  response = urllib.request.urlopen(request)
+                  print(f"Slack notification sent: {response.status}")
+              except urllib.error.URLError as e:
+                  print(f"Failed to send Slack notification: {e}")
+
+  # EventBridge Rule for daily schedule
+  DriftDetectionScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: cf-drift-detection-daily
+      Description: Daily CloudFormation drift detection for pipeline-managed stacks
+      ScheduleExpression: !Ref DriftCheckSchedule
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt DriftDetectionFunction.Arn
+          Id: DriftDetectionTarget
+
+  # Permission for EventBridge to invoke Lambda
+  DriftDetectionLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DriftDetectionFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DriftDetectionScheduleRule.Arn
+
+Outputs:
+  LambdaFunctionArn:
+    Description: ARN of the drift detection Lambda function
+    Value: !GetAtt DriftDetectionFunction.Arn
+
+  LambdaFunctionName:
+    Description: Name of the drift detection Lambda function
+    Value: !Ref DriftDetectionFunction
+
+  EventBridgeRuleName:
+    Description: Name of the EventBridge rule
+    Value: !Ref DriftDetectionScheduleRule
+
+  SlackWebhookParameterName:
+    Description: Parameter Store path for Slack webhook
+    Value: !Ref SlackWebhookParameter

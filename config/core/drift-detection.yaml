@@ -1,0 +1,10 @@
+template:
+  type: file
+  path: core/drift-detection.yaml
+
+on_failure: ROLLBACK
+
+parameters:
+  SlackWebhookUrl: !environment_variable SLACK_WEBHOOK_URL
+  ProjectCode: !environment_variable PROJECT_CODE
+  DriftCheckSchedule: "cron(0 8 * * ? *)"

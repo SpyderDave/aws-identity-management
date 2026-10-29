@@ -1,0 +1,792 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: SSO Managed Permission Sets
+Parameters:
+  SSOInstanceArn:
+    Type: String 
+  SSMPrefix:
+    Type: String
+    Default: /platform/sso/permissionsets
+  SSOInstanceId:
+    Type: String
+  OperationsAllowedTagKeys:
+    Type: List<String>
+    Description: Tag keys the Operations Support role may manage on EC2 instances.
+    Default: "Managed, managed, Env, env, Environment, environment"
+
+Resources:
+
+  BillingAdmin:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_BillingAdmin'
+      Description: 'Permission Set for BillingAdmin - assigned to prod by default'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - "arn:aws:iam::aws:policy/AWSArtifactAgreementsFullAccess"
+        - "arn:aws:iam::aws:policy/job-function/Billing"
+        - "arn:aws:iam::aws:policy/ReadOnlyAccess"
+        - 'arn:aws:iam::aws:policy/AWSSupportAccess'
+      # CustomerManagedPolicyReferences:
+      #   - Name: Platform-FinOpsAdmin
+      #     Path: /platform/
+      InlinePolicy:
+        Version: '2012-10-17'
+        Statement:
+          #- Effect: 'Allow'
+          #  Action:
+          #    - 'aws-portal:*'
+          #  Resource: '*'
+          - Effect: Allow
+            Action:
+              - 'trustedadvisor:*'
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - 'dynamodb:*'    
+            Resource: '*'              
+          - Effect: 'Allow'
+            Action:
+              - 'bcm-data-exports:*'
+              - 'billing:*'
+              - 'ce:*'
+              - 'consolidatedbilling:*'
+              - 'cur:*'
+              - 'invoicing:*'
+              - 'invoicing:*'
+              - 'tax:*'
+              - 'sustainability:GetCarbonFootprintSummary'
+              - payments:*
+              - purchase-orders:Update*
+              - purchase-orders:Add*
+              - savingsplans:*
+              - tax:BatchPut*
+              - tax:Delete*
+              - tax:Put*
+              - tax:Update*
+            Resource: '*'          
+          - Effect: 'Allow'  
+            Action: 
+              - 'aws-marketplace:*'
+            Resource: '*' 
+          - Sid: AllowPurchase
+            Effect: Allow
+            Action:
+              - account:Put*
+              - aws-marketplace:Subscribe
+              - aws-marketplace:CreateAgreementRequest
+              - aws-marketplace:AcceptAgreement*
+              - dynamodb:PurchaseReservedCapacityOfferings
+              - ec2:AcceptReservedInstancesExchangeQuote
+              - ec2:CancelReservedInstancesListing
+              - ec2:CreateReservedInstancesListing
+              - ec2:DeleteQueuedReservedInstances
+              - ec2:GetReservedInstancesExchangeQuote
+              - ec2:ModifyReservedInstances
+              - 'ec2:Purchase*'
+              - ec2:DescribeHostReservationOfferings
+              - ec2:DescribeHostReservations
+              - ec2:GetHostReservationPurchasePreview
+              - ec2:CreateCapacityReservation
+              - ec2:CancelCapacityReservation
+              - ec2:GetCapacityReservationUsage
+              - ec2:DescribeCapacityReservations
+              - ec2:GetGroupsForCapacityReservation
+              - ec2:ModifyCapacityReservation
+              - ec2:ModifyInstanceCapacityReservationAttributes
+              - 'rds:Purchase*'
+              - 'elasticache:Purchase*'
+              - 'es:Purchase*'
+            Resource: '*'
+
+  BillingAdminParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/BillingAdmin"
+      Type: String
+      Value: !GetAtt BillingAdmin.PermissionSetArn
+
+  BillingReadOnly:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_BillingReadOnly'
+      Description: 'Permission Set for BillingReadOnly'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - "arn:aws:iam::aws:policy/AWSArtifactAgreementsReadOnlyAccess"
+        - "arn:aws:iam::aws:policy/job-function/Billing"      
+        - "arn:aws:iam::aws:policy/AWSBillingReadOnlyAccess"
+        - "arn:aws:iam::aws:policy/CostOptimizationHubReadOnlyAccess"
+      InlinePolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'aws-marketplace-management:view*'
+              - 'aws-marketplace:List*'
+              - 'aws-marketplace:Get*'
+              - 'billing:Get*'
+              - 'ce:Get*'
+              - 'consolidatedbilling:Get*'
+              - 'cur:Get*'
+              - 'invoicing:Get*'
+              - 'invoicing:List*'
+              - 'tax:Get*'
+              - 'tax:List*'
+            Resource: '*'
+          - Effect: 'Allow'
+            Action:
+              - 's3:GetBucketLocation'
+              - 's3:ListAllMyBuckets'
+            Resource: 'arn:aws:s3:::*'
+          - Effect: 'Allow'
+            Action:
+              - 's3:ListBucket'
+            Resource: 'arn:aws:s3:::example-bucket-001'
+          - Effect: 'Allow'
+            Action:
+              - 's3:GetObject'
+            Resource: 'arn:aws:s3:::example-bucket-001/*-AWSMarketplace*'
+
+  BillingReadOnlyParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/BillingReadOnly"
+      Type: String
+      Value: !GetAtt BillingReadOnly.PermissionSetArn
+
+  PlatformAdmin:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_PlatformAdmin'
+      Description: 'Permission Set for PlatformAdmin - BreakGlass'
+      SessionDuration: 'PT8H'
+      ManagedPolicies:
+        - 'arn:aws:iam::aws:policy/AdministratorAccess' 
+      # CustomerManagedPolicyReferences:
+      #   - Name: Platform-PlatformAdmin
+      #     Path: /platform/privileged/
+      InlinePolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action:
+              - 'sts:AssumeRole'
+            Resource: '*'
+          - Effect: 'Allow'
+            Action:
+              - 'artifact:Get*'
+            Resource: 
+              - "arn:aws:artifact:::report-package/*"       
+              - "arn:aws:artifact:::report/*"
+  PlatformAdminParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/PlatformAdmin"
+      Type: String
+      Value: !GetAtt PlatformAdmin.PermissionSetArn
+
+  IAMAdmin:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_IAMAdmin'
+      Description: 'Permission Set for IAM Admin'
+      SessionDuration: 'PT4H'
+      # CustomerManagedPolicyReferences:
+      #   - Name: Platform-ProdAdmin
+      #     Path: /platform/privileged/
+      InlinePolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action:
+              - 'iam:*'
+            Resource: '*'      
+  IAMAdminParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/IAMAdmin"
+      Type: String
+      Value: !GetAtt IAMAdmin.PermissionSetArn
+
+  DNSAdmin:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_DNSAdmin'
+      Description: 'Permission Set for DNSAdmin - DNS Admin'
+      SessionDuration: 'PT4H'
+      # CustomerManagedPolicyReferences:
+      #   - Name: Platform-DNSAdminPolicy
+      #     Path: /platform/privileged/
+      InlinePolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - "route53:Get*"
+              - "route53:List*"
+              - "route53:ChangeResourceRecordSets"
+              - "cloudfront:Get*"
+              - "cloudfront:List*"
+            Resource: "*"
+  DNSAdminParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/DNSAdmin"
+      Type: String
+      Value: !GetAtt DNSAdmin.PermissionSetArn
+  
+  ProductAdmin:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_ProductAdmin'
+      Description: 'Permission Set for ProductAdmin'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - 'arn:aws:iam::aws:policy/AdministratorAccess' 
+      CustomerManagedPolicyReferences:
+        # - Name: Platform-ProductAdminPolicy
+        #   Path: /platform/privileged/
+        - Name: Platform-DenyBillingChanges
+          Path: /platform/standard/
+        - Name: Platform-DenyCoreServices
+          Path: /platform/standard/     
+        - Name: Platform-DenyUnencryptedEBS
+          Path: /platform/standard/    
+        - Name: Platform-DenyRegions
+          Path: /platform/standard/    
+      InlinePolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: "Deny"
+            Action:
+              - 'iam:CreateLoginProfile'
+              - 'iam:CreateUser'
+              # - 'iam:DeleteUser'
+              - 'iam:UpdateUser'
+              # - 'iam:DetachUserPolicy'
+              - 'iam:PutUserPolicy'
+              - 'iam:PutUserPermissionsBoundary'
+              - 'iam:DeleteSAMLProvider'
+              - 'iam:CreateSAMLProvider'
+              - 'iam:DeleteOpenIDConnectProvider'
+              - 'iam:CreateOpenIDConnectProvider'
+              - 'iam:RemoveClientIDFromOpenIDConnectProvider'
+              - 'iam:UpdateOpenID*'
+              - 'iam:UpdateSAML*'
+              - 's3:PutAccountPublicAccessBlock'
+              - 'organizations:AttachPolicy'
+              - 'organizations:DeletePolicy'
+              - 'organizations:DetachPolicy'
+              - 'organizations:DisablePolicyType'
+              - 'organizations:EnablePolicyType'
+              - 'organizations:UpdatePolicy'
+              - 'controltower:DisableControl'
+              - 'controltower:EnableControl'
+              - 'controltower:EnableGuardrail'
+              - 'controltower:DisableGuardrail'
+            Resource: "*"      
+  ProductAdminParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/ProductAdmin"
+      Type: String
+      Value: !GetAtt ProductAdmin.PermissionSetArn
+
+  CloudAdmin:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_CloudAdmin'
+      Description: 'Permission Set for CloudAdmin (Common)'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - 'arn:aws:iam::aws:policy/AdministratorAccess'
+        - 'arn:aws:iam::aws:policy/AWSFMAdminFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonBedrockFullAccess'
+      CustomerManagedPolicyReferences:
+        - Name: Platform-DenyBillingChanges
+          Path: /platform/standard/
+        - Name: Platform-DenyCoreServices
+          Path: /platform/standard/     
+        - Name: Platform-Protectionv2
+          Path: /platform/
+      InlinePolicy: 
+        Version: '2012-10-17'
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - "cur:Get*"
+              - "ce:Get*"
+              - "ce:List*"
+              - "ce:Describe*"
+            Resource: "*"
+          - Effect: Deny
+            Action: 
+              - iam:AttachRolePolicy
+            Resource: 'arn:aws:iam::aws:policy/AdministratorAccess'
+          - Effect: "Deny"
+            Action:
+              - 'ec2:CreateClientVpnEndpoint'
+              - 'iam:CreateUser'
+              # - 'iam:DeleteUser'
+              - 'iam:UpdateUser'
+              # - 'iam:DetachUserPolicy'
+              - 'iam:PutUserPolicy'
+              - 'iam:PutUserPermissionsBoundary'
+              - 'iam:DeleteSAMLProvider'
+              - 'iam:CreateSAMLProvider'
+              - 'iam:DeleteOpenIDConnectProvider'
+              - 'iam:CreateOpenIDConnectProvider'
+              - 'iam:RemoveClientIDFromOpenIDConnectProvider'
+              - 'iam:UpdateOpenID*'
+              - 'iam:UpdateSAML*'
+              #- 'iam:CreatePolicyVersion'
+              #- 'iam:SetDefaultPolicyVersion'
+              #- 'iam:AttachRolePolicy'
+              # - 'iam:PutRolePolicy'
+              # - 'iam:PassRole'
+              - 's3:PutAccountPublicAccessBlock'
+              - 'organizations:AttachPolicy'
+              - 'organizations:DeletePolicy'
+              - 'organizations:DetachPolicy'
+              - 'organizations:DisablePolicyType'
+              - 'organizations:EnablePolicyType'
+              - 'organizations:UpdatePolicy'
+              - 'controltower:Disable*'
+              - 'controltower:Enable*'
+              - 'controltower:Delete*'
+              - 'controltower:Create*'
+              - 'controltower:Update*'
+              - 'controltower:Reset*'
+              - 'controltower:Setup*'
+              - 'sso:Add*'
+              - 'sso:Associate*'
+              - 'sso:Attach*'
+              - 'sso:Create*'
+              - 'sso:Delete*'
+              - 'sso:Disassociate*'
+              - 'sso:Detach*'
+              - 'sso:Import*'
+              - 'sso:Put*'
+              - 'sso:Remove*'
+              - 'sso:Start*'
+              - 'sso:Update*'
+              - 'identitystore:Add*'
+              - 'identitystore:Create*'
+              - 'identitystore:Delete*'
+              - 'identitystore:Reserve*'
+              - 'identitystore:Update*'
+            Resource: "*"
+
+  CloudAdminParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/CloudAdmin"
+      Type: String
+      Value: !GetAtt CloudAdmin.PermissionSetArn
+
+  CloudReadOnly:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_CloudReadOnly'
+      Description: 'Permission Set for CloudReadOnly'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - 'arn:aws:iam::aws:policy/ReadOnlyAccess'
+        - 'arn:aws:iam::aws:policy/AWSSupportAccess'
+        - 'arn:aws:iam::aws:policy/CloudWatchLogsReadOnlyAccess'
+        - 'arn:aws:iam::aws:policy/SignInLocalDevelopmentAccess'
+      CustomerManagedPolicyReferences:
+        - Name: Platform-DenyBillingChanges
+          Path: /platform/standard/        
+        
+  CloudReadOnlyParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/CloudReadOnly"
+      Type: String
+      Value: !GetAtt CloudReadOnly.PermissionSetArn
+
+  SSMSessionUser:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_SSMSessionUser'
+      Description: 'Permission Set for SSMSessionUser'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - 'arn:aws:iam::aws:policy/ReadOnlyAccess'
+        - 'arn:aws:iam::aws:policy/AWSSupportAccess'
+      # CustomerManagedPolicyReferences:
+      #   - Name: Platform-SSMSessionUserPolicy
+      #     Path: /platform/
+        #- Name: Platform-Protection
+        #  Path: /platform/
+      InlinePolicy: 
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - 'ssm:StartSession'
+              - 'ssm:TerminateSession'
+              - 'ssm:GetParameter'
+              - 'ssm-guiconnect:*'
+              - 'ssm:SendCommand'
+  #            Condition:
+  #              BoolIfExists:
+  #                "ssm:SessionDocumentAccessCheck": "true"
+            Resource: '*'
+  # The following lines would limit the user to only using our custom SSM Documents which enable Cloudwatch logging of SSM Sessions.
+  #              - arn:aws:ec2:*:*:instance/*
+  #              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:document/*"
+  #              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:document/${SessionManagerLoggingDocumentName}"
+  #              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:document/${PortForwardDocumentName}"      
+  SSMSessionUserParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/SSMSessionUser"
+      Type: String
+      Value: !GetAtt SSMSessionUser.PermissionSetArn
+
+  LabAdmin:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_LabAdmin'
+      Description: 'Permission Set for LabAdmin'
+      SessionDuration: 'PT8H'
+      ManagedPolicies:
+        - 'arn:aws:iam::aws:policy/AdministratorAccess'        
+      CustomerManagedPolicyReferences:
+        - Name: Platform-DenyBillingChanges
+          Path: /platform/standard/
+        - Name: Platform-DenyCoreServices
+          Path: /platform/standard/     
+      InlinePolicy: 
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action:
+              - 's3:*'
+            Resource: "*"
+          - Effect: 'Allow'
+            Action:
+              - 'eks:*'
+            Resource: '*'
+          # - Effect: 'Deny'
+          #   Action:
+          #     - 'iam:CreateLoginProfile'
+          #   Resource: '*'
+          - Effect: "Deny"
+            Action:
+              # - 'iam:CreateUser'
+              # - 'iam:DeleteUser'
+              # - 'iam:UpdateUser'
+              # - 'iam:DetachUserPolicy'
+              # - 'iam:PutUserPolicy'
+              # - 'iam:PutUserPermissionsBoundary'
+              # - 'iam:DeleteSAMLProvider'
+              # - 'iam:CreateSAMLProvider'
+              # - 'iam:DeleteOpenIDConnectProvider'
+              # - 'iam:CreateOpenIDConnectProvider'
+              # - 'iam:RemoveClientIDFromOpenIDConnectProvider'
+              # - 'iam:UpdateOpenID*'
+              # - 'iam:UpdateSAML*'
+              - 's3:PutAccountPublicAccessBlock'
+              - 'organizations:AttachPolicy'
+              - 'organizations:DeletePolicy'
+              - 'organizations:DetachPolicy'
+              - 'organizations:DisablePolicyType'
+              - 'organizations:EnablePolicyType'
+              - 'organizations:UpdatePolicy'
+              - 'controltower:DisableControl'
+              - 'controltower:EnableControl'
+              - 'controltower:EnableGuardrail'
+              - 'controltower:DisableGuardrail'
+            Resource: "*"
+
+  LabAdminParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/LabAdmin"
+      Type: String
+      Value: !GetAtt LabAdmin.PermissionSetArn
+
+  SecurityReadOnly:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_SecurityReadOnly'
+      Description: 'Permission Set for SecurityReadOnly'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - 'arn:aws:iam::aws:policy/AWSSupportAccess'
+        - 'arn:aws:iam::aws:policy/SecurityAudit'
+        - "arn:aws:iam::aws:policy/ReadOnlyAccess"
+      InlinePolicy: 
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'app-integrations:List*'
+            Resource: '*'
+          - Effect: 'Deny'
+            Action:
+              - 'secretsmanager:GetSecretValue'
+              - 'secretsmanager:Delete*'           
+              - 'secretsmanager:Put*'
+              - 'secretsmanager:Replicate*'
+              - 'secretsmanager:Restore*'
+              - 'secretsmanager:Update*'
+              - 'secretsmanager:Tag*'
+              - 'secretsmanager:Untag*'
+              - 'secretsmanager:Rotate*'
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - dynamodb:GetItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - rds-db:connect              
+            Resource: '*'
+  SecurityReadOnlyParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/SecurityReadOnly"
+      Type: String
+      Value: !GetAtt SecurityReadOnly.PermissionSetArn
+
+  SecurityAdmin:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_SecurityAdmin'
+      Description: 'Permission Set for SecurityAdmin'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - 'arn:aws:iam::aws:policy/SecurityAudit'
+        - 'arn:aws:iam::aws:policy/AWSSecurityHubFullAccess'
+      CustomerManagedPolicyReferences:
+        - Name: Platform-DenyCoreServices
+          Path: /platform/standard/
+        - Name: Platform-DenyBillingChanges
+          Path: /platform/standard/
+        - Name: Platform-DenyRegions
+          Path: /platform/standard/     
+        # - Name: Platform-SecurityAdmin 
+        #   Path: /platform/standard/   
+      InlinePolicy: 
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Deny'
+            Action:
+              - 'secretsmanager:GetSecretValue'
+              - 'secretsmanager:Delete*'           
+              - 'secretsmanager:Put*'
+              - 'secretsmanager:Replicate*'
+              - 'secretsmanager:Restore*'
+              - 'secretsmanager:Update*'
+              - 'secretsmanager:Tag*'
+              - 'secretsmanager:Untag*'
+              - 'secretsmanager:Rotate*'
+            Resource: '*'
+          - Sid: AllowBasicAccountInformationViewing
+            Effect: Allow
+            Action:
+              - iam:GetAccountSummary
+              - iam:ListAccountAliases
+              - iam:ListPolicies
+              - iam:GetPolicy*
+              - organizations:ListAccounts
+              - organizations:DescribeOrganization
+            Resource: '*'
+          - Sid: AllowIamListGroups
+            Effect: Allow
+            Action:
+              - iam:ListGroups
+            Resource: '*'
+          - Sid: AllowIamListUsers
+            Effect: Allow
+            Action:
+              - iam:ListUsers
+            Resource: '*'
+
+  SecurityAdminParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/SecurityAdmin"
+      Type: String
+      Value: !GetAtt SecurityAdmin.PermissionSetArn
+
+  Developer:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_Developer'
+      Description: 'Permission Set for Developer'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - 'arn:aws:iam::aws:policy/ReadOnlyAccess'
+        - 'arn:aws:iam::aws:policy/AWSSupportAccess'
+      CustomerManagedPolicyReferences:
+        # - Name: Platform-DeveloperPolicy
+        #   Path: /platform/standard/
+        - Name: Platform-Protectionv2
+          Path: /platform/       
+      InlinePolicy: 
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - s3:DeleteObject
+              - s3:PutObject
+            Resource:
+              - "arn:aws:s3:::example-bucket-002"
+              - "arn:aws:s3:::example-bucket-003"
+          - Effect: "Allow"
+            Action:
+              - kinesis:PutRecord
+              - kinesis:PutRecords
+              - dynamodb:BatchWriteItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:DeleteItem
+              - lambda:InvokeAsync
+              - lambda:InvokeFunction
+              - states:StartExecution
+              - states:StopExecution
+            Resource:
+              - "*"
+          - Effect: Allow
+            Action:
+              - "xray:PutTraceSegments"
+              - "xray:PutTelemetryRecords"
+              - "xray:GetSamplingRules"
+              - "xray:GetSamplingTargets"
+              - "xray:GetSamplingStatisticSummaries"
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "ses:SendEmail"
+              - "ses:SendTemplatedEmail"
+              - "ses:SendRawEmail"
+              - "ses:SendBulkTemplatedEmail"
+            Resource: "*" 
+  DeveloperParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/Developer"
+      Type: String
+      Value: !GetAtt Developer.PermissionSetArn
+
+  OperationsSupport:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_OperationsSupport'
+      Description: 'Permission Set for Operations Support'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - 'arn:aws:iam::aws:policy/ReadOnlyAccess'
+        - 'arn:aws:iam::aws:policy/AWSSupportAccess'
+      InlinePolicy: 
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - route53:ChangeResourceRecordSets
+              - route53:ListHostedZones
+              - route53:GetChange
+              - route53:ListResourceRecordSets
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - autoscaling:UpdateAutoScalingGroup
+              - autoscaling:DescribeAutoScalingGroups
+              - autoscaling:SetDesiredCapacity
+              - autoscaling:Get*
+              - autoscaling:List*
+              - autoscaling:Describe*
+            Resource: '*'
+          - Effect: "Allow"
+            Action:
+              - 'ssm:StartSession'
+              - 'ssm:TerminateSession'
+              - 'ssm:GetParameter'
+              - 'ssm-guiconnect:*'
+              - 'ssm:SendCommand'
+            Resource: '*'
+          # ----- Allow ADD / UPDATE allowed tags -----
+          - Effect: Allow
+            Action:
+              - ec2:CreateTags
+              - ec2:DeleteTags
+            Resource: arn:aws:ec2:*:*:instance/*
+            # Condition:
+            #   StringEquals:
+            #     aws:TagKeys: !Ref OperationsAllowedTagKeys            
+  
+          # Optional: allow reading the instance and tags
+          - Effect: Allow
+            Action:
+              - ec2:DescribeInstances
+              - ec2:DescribeTags
+            Resource: "*"          
+          - Effect: Allow
+            Action:
+              - ec2:StartInstance
+              - ec2:StopInstance
+            Resource: arn:aws:ec2:*:*:instance/*
+            Condition:
+              ForAnyValue:StringEquals:
+                ec2:ResourceTag/Managed: "*"
+          - Effect: Allow
+            Action:
+              - ec2:StartInstance
+              - ec2:StopInstance
+            Resource: arn:aws:ec2:*:*:instance/*
+            Condition:
+              ForAnyValue:StringEquals:
+                ec2:ResourceTag/managed: "*"                
+
+  OperationsSupportParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/OperationsSupport"
+      Type: String
+      Value: !GetAtt OperationsSupport.PermissionSetArn
+
+  CTCloudReadOnly:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Legacy_CTCloudReadOnly'
+      Description: 'Permission Set for CTCloudReadOnly - adds ControlTower'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - 'arn:aws:iam::aws:policy/ReadOnlyAccess'
+      CustomerManagedPolicyReferences:
+        - Name: Platform-DenyBillingChanges
+          Path: /platform/standard/        
+      InlinePolicy: 
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - controltower:Get*
+              - controltower:Describe*
+              - controltower:List*
+            Resource: '*'
+
+  CTCloudReadOnlyParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/CTCloudReadOnly"
+      Type: String
+      Value: !GetAtt CTCloudReadOnly.PermissionSetArn

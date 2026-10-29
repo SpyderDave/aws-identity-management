@@ -1,0 +1,156 @@
+template:
+  type: file
+  path: assignments.yaml.j2
+dependencies:
+  - prod/product/platform-ops-permission-sets.yaml
+on_failure: ROLLBACK
+parameters:
+    SSMPrefix: "/platform/sso/permissionsets/org"
+    SSOInstanceArn: {{ environment_variable.SSOINSTANCEARN }}
+    SSOInstanceId: {{ environment_variable.SSOINSTANCEID }}
+    AssignmentFunction: !ssm /platform/sso/permissionsets/org/AssignmentsFunction
+sceptre_user_data:
+  Assignments:
+    # example-label-067
+    - name: 'ops-group-25'
+      account: '100000000002'
+      permission: "CloudAdmin"
+    - name: 'ops-group-24'
+      account: '100000000002'
+      permission: "CTCloudReadOnly"
+    - name: 'ops-group-26'
+      account: '100000000003'
+      permission: "CloudAdmin"
+    - name: 'ops-group-24'
+      account: '100000000003'
+      permission: "CTCloudReadOnly"      
+
+    # example-label-205
+    # - name: 'ops-group-02'
+    #   account: ''
+    #   permission: "CloudAdmin"
+
+    # example-label-206
+    - name: 'ops-group-01'
+      account: '100000000004'
+      permission: "CloudAdmin"
+
+    # example-label-207
+    - name: 'ops-group-24'
+      account: '100000000005'
+      permission: "CTCloudReadOnly"
+    - name: 'ops-group-35'
+      account: '100000000005'
+      permission: "CloudAdmin"
+    - name: 'ops-group-34'
+      account: '100000000005'
+      permission: "BillingReadOnly"
+    - name: 'ops-group-33'
+      account: '100000000005'
+      permission: "BillingAdmin"
+    - name: 'ops-group-36'
+      account: '100000000005'
+      permission: "CloudReadOnly"
+    - name: 'ops-group-37'
+      account: '100000000005'
+      permission: "DNSAdmin"      
+    # - name: 'ops-group-38'
+    #   account: '100000000005'
+    #   permission: "OrgReadOnly"      
+
+
+
+    # example-label-208
+    - name: 'ops-group-28'
+      account: '100000000006'
+      permission: "CloudAdmin"
+    - name: 'ops-group-30'
+      account: '100000000006'
+      permission: "IAMAdmin"
+    - name: 'ops-group-32'
+      account: '100000000006'
+      permission: "PlatformAdmin"
+    - name: 'ops-group-29'
+      account: '100000000006'
+      permission: "CloudReadOnly"
+    - name: 'ops-group-31'
+      account: '100000000006'
+      permission: "SSMSessionUser"
+    - name: 'ops-group-27'
+      account: '100000000006'
+      permission: "Mgmt-ProductSupport"      
+
+    # example-label-209
+    - name: 'ops-group-03'
+      account: '100000000007'
+      permission: "CloudAdmin"
+    - name: 'ops-group-07'
+      account: '100000000007'
+      permission: "PlatformAdmin"
+    - name: 'ops-group-04'
+      account: '100000000007'
+      permission: "CloudReadOnly"
+    - name: 'ops-group-05'
+      account: '100000000007'
+      permission: "Shared-ProductSupport"
+    - name: 'ops-group-06'
+      account: '100000000007'
+      permission: "SSMSessionUser"
+
+    # example-label-210
+    - name: 'ops-group-10'
+      account: '100000000001'
+      permission: "CloudAdmin"
+    - name: 'ops-group-14'
+      account: '100000000001'
+      permission: "PlatformAdmin"
+    - name: 'ops-group-11'
+      account: '100000000001'
+      permission: "CloudReadOnly"
+    - name: 'ops-group-12'
+      account: '100000000001'
+      permission: "Shared-ProductSupport"
+    - name: 'ops-group-09'
+      account: '100000000001'
+      permission: "Shared-Role02"
+    - name: 'ops-group-13'
+      account: '100000000001'
+      permission: "SSMSessionUser"
+    # example-label-211
+    # example-label-212
+    - name: 'ops-group-08'
+      account: '100000000001'
+      permission: "Shared-Role01"
+
+    # example-label-213
+    - name: 'ops-group-15'
+      account: '100000000008'
+      permission: "CloudAdmin"
+    - name: 'ops-group-16'
+      account: '100000000008'
+      permission: "CloudReadOnly"
+    - name: 'ops-group-17'
+      account: '100000000008'
+      permission: "SSMSessionUser"
+
+    # example-label-214
+    - name: 'ops-group-18'
+      account: '100000000009'
+      permission: "CloudAdmin"
+    - name: 'ops-group-19'
+      account: '100000000009'
+      permission: "CloudReadOnly"
+    - name: 'ops-group-20'
+      account: '100000000009'
+      permission: "SSMSessionUser"
+
+    # example-label-215
+    - name: 'ops-group-21'
+      account: '100000000010'
+      permission: "CloudAdmin"
+    - name: 'ops-group-23'
+      account: '100000000010'
+      permission: "PlatformAdmin"
+    - name: 'ops-group-22'
+      account: '100000000010'
+      permission: "CloudReadOnly"

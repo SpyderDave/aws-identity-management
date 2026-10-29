@@ -1,0 +1,8 @@
+template:
+  type: file
+  path: core/sso-permission-sets.yaml
+on_failure: ROLLBACK
+parameters:
+    SSMPrefix: "/platform/sso/permissionsets/org"
+    SSOInstanceArn: {{ environment_variable.SSOINSTANCEARN }}  
+    SSOInstanceId: {{environment_variable.SSOINSTANCEID}}

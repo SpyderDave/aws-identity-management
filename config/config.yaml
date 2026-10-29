@@ -1,0 +1,28 @@
+project_code: aws-identity-management
+region: ca-central-1
+
+# Shared stack tags applied to every stack via StackGroup inheritance.
+# Replaces the old per-file Jinja include of stack_tags.txt, which could not
+# work: Sceptre roots the Jinja loader at each config file's own directory and
+# Jinja2's FileSystemLoader rejects any '..' path segment.
+stack_tags:
+    application: sso
+    role: org-prod
+    env: !environment_variable GITHUB_BRANCH
+    service: "aws-platform"
+    service-owner: "platform"
+    stack: "platform"
+    lob: "IT"
+    service-offering: "aws-platform"
+    managed-by: "github-actions"
+    cost-center: "example-cost-center"
+    e-code: "E 0000000 00"    
+    # GitHub environment variables from workflow
+    GitHubRepository: !environment_variable GITHUB_REPOSITORY
+    GitHubBranch: !environment_variable GITHUB_BRANCH
+    # GitHubActor: !environment_variable GITHUB_ACTOR
+    # GitHubCommitShort: !environment_variable GITHUB_COMMIT_SHORT
+    # GitHubCommitAuthor: !environment_variable GITHUB_COMMIT_AUTHOR
+    # GitHubCommitAuthorEmail: !environment_variable GITHUB_COMMIT_AUTHOR_EMAIL
+    # GitHubCommitMessage: !environment_variable GITHUB_COMMIT_MESSAGE
+    # GitHubRunId: !environment_variable GITHUB_RUN_ID

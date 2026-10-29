@@ -1,0 +1,12 @@
+template:
+  type: file
+  path: product/platform-ops-sso-permission-sets.yaml
+on_failure: ROLLBACK
+parameters:
+    SSMPrefix: "/platform/sso/permissionsets/org"
+    SSOInstanceArn: {{ environment_variable.SSOINSTANCEARN }}
+    SSOInstanceId: {{ environment_variable.SSOINSTANCEID }}
+    # example-label-226
+    # example-label-227
+    # example-label-228
+    SharedServicesProdAccountId: "100000000001"

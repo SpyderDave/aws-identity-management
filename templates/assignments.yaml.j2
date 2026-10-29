@@ -1,0 +1,62 @@
+# 
+# SSO PermissionSet Assignment Template
+#
+# Note that this cloudformation template utilizes embedded Jinja2 templating and must be pre-processed by Jinja2 before submitting to CloudFormation 
+# sceptre automatically does this for us when using our homegrown sceptre-deploy pipelining tool 
+#
+AWSTemplateFormatVersion: 2010-09-09
+Description: "SSO Assignments"
+Parameters:
+  SSOInstanceArn:
+    Type: String 
+  SSMPrefix:
+    Type: String
+    Default: /platform/sso/permissionsets
+  SSOInstanceId: 
+    Type: String
+  AssignmentFunction:
+    Type: String
+
+Resources:
+  NullResource:
+    Type: AWS::CloudFormation::WaitConditionHandle
+  {% set ns = namespace() %}
+  {% set ns.previous = "NullResource" %}
+  {%- for Assignment in sceptre_user_data.Assignments %}
+  {% set ns.group_name = Assignment.name|lower %}
+  {% set ns.clean_group_name = Assignment.name|lower|replace("-","")|replace("_","")|replace('.',"")|replace('ag-aws-',"") %}
+  {% set ns.resource_base = Assignment.account|string|replace("-","d")|replace("_","s")|replace('.',"p") %}
+  {% set ns.permission = Assignment.permission|string|replace("-","d")|replace("_","s")|replace('.',"p") %}
+  {#
+     CloudFormation logical IDs must be alphanumeric and <= 255 chars. The
+     (permission + account) pair alone is not unique once the same permission
+     set is assigned to more than one group in the same account, so we generate
+     a deterministic hex hash of the group name to guarantee uniqueness while
+     keeping the ID short and well clear of the 255-char limit.
+  #}
+  {% set name_lower = Assignment.name|lower %}
+  {% set hash_ns = namespace(v=5381) %}
+  {% for char in name_lower %}
+    {# Convert character to base-36 value: 0-9=0-9, a-z=10-35, others=36 #}
+    {% set char_val = char|int(default=36, base=36) %}
+    {% set hash_ns.v = (hash_ns.v * 33 + char_val + loop.index0) % 4294967296 %}
+  {% endfor %}
+  {% set ns.group_token = 'h' + (hash_ns.v % 999999999)|string %}
+  {% set ns.resource_id = ns.permission + ns.resource_base + ns.group_token %}
+  {{ns.resource_id}}:
+    Type: AWS::SSO::Assignment
+    DependsOn: [ RUN{{ns.resource_id}} , {{ns.previous}} ]
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      PermissionSetArn: !Join [ '', ['{{'{{'}}', 'resolve:ssm:', !Ref SSMPrefix, '/', {{ Assignment.permission }},'{{'}}'}}']]
+      TargetId: "{{ Assignment.account }}"
+      TargetType: 'AWS_ACCOUNT'
+      PrincipalType: 'GROUP'
+      PrincipalId: !GetAtt RUN{{ns.resource_id}}.GroupId
+  RUN{{ns.resource_id}}:
+    Type: Custom::CustomRunner
+    Properties:
+      ServiceToken: !Ref AssignmentFunction
+      group_name: "{{ ns.group_name }}"
+  {% set ns.previous = ns.resource_id %}
+  {%- endfor %}

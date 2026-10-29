@@ -1,0 +1,509 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Product Specific SSO Managed Permission Sets - platform-ops
+Parameters:
+  SSOInstanceArn:
+    Type: String 
+  SSMPrefix:
+    Type: String
+    Default: /platform/sso/permissionsets
+  SSOInstanceId:
+    Type: String
+  # The account a permission set's resource ARNs point at. Named for the specific
+  # account rather than something generic like TargetAccountId, because this template
+  # serves several: Mgmt-ProductSupport is used in management, the Platform-SS-* sets in
+  # shared services. A second ARN-scoped set aimed elsewhere gets its own parameter.
+  #
+  # This must never be ${AWS::AccountId}. That pseudo-parameter resolves to the account
+  # the stack is deployed FROM (org-prod, 100000000005), not the account the permission
+  # set is used IN, and Identity Center does no further substitution when the role is
+  # assumed. Using it silently produced arn:aws:iam::100000000005:policy/platform-* and made
+  # every write an implicitDeny. See PR 102.
+  SharedServicesProdAccountId:
+    Type: String
+    AllowedPattern: '^[0-9]{12}$'
+    Description: 'AWS account id that the Shared-Role01 resource ARNs are scoped to (shared-services-prod)'
+    # Default matches the literal value already passed by
+    # config/prod/product/platform-ops-permission-sets.yaml for real deployments. Neither actual
+    # consumer honors it -- Sceptre always supplies the value explicitly, and
+    # cfn-policy-validator (validate-iam.yml) ignores a template's Default entirely and requires
+    # every referenced parameter on its --parameters flag regardless. It's kept purely as
+    # documentation / a safety net for any other ad-hoc tooling (e.g. a manual
+    # `aws cloudformation validate-template`) that does honor Default.
+    Default: '100000000001'
+Resources:
+
+  MGMTProductSupport:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Mgmt-ProductSupport'
+      Description: 'Permission Set for MGMT ProductSupport'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - "arn:aws:iam::aws:policy/ReadOnlyAccess"          
+      CustomerManagedPolicyReferences:
+        - Name: ProductSupportRolePolicy-additional
+          Path: /platform/
+  MGMTProductSupportParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/Mgmt-ProductSupport"
+      Type: String
+      Value: !GetAtt MGMTProductSupport.PermissionSetArn
+
+  SSProductSupport:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Shared-ProductSupport'
+      Description: 'Permission Set for Shared Services ProductSupport'
+      SessionDuration: 'PT4H'
+      ManagedPolicies:
+        - "arn:aws:iam::aws:policy/ReadOnlyAccess"          
+      CustomerManagedPolicyReferences:
+        - Name: ProductSupportRolePolicy-additional
+          Path: /platform/
+  SSProductSupportParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/Shared-ProductSupport"
+      Type: String
+      Value: !GetAtt SSProductSupport.PermissionSetArn
+
+  BBMigrationUser:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Shared-Role02'
+      Description: 'Permission Set for Shared Services BBMigrationUser'
+      SessionDuration: 'PT8H'
+      InlinePolicy: 
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'ssm:SendCommand'
+              - 'ssm:GetCommandInvocation'
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - 'ssm:Get*'
+              - 'ssm:Describe*'
+              - 'ssm:List*'
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - ssm:StartSession
+            Resource:
+              - 'arn:aws:ec2:*:*:instance/*'
+            Condition:
+              StringLike:
+                ssm:resourceTag/application:
+                  - bbmigration
+          - Effect: Allow
+            Action:
+              - 'ssm-guiconnect:*'
+            Resource:
+              - '*'
+            Condition:
+              StringLike:
+                ssm:resourceTag/application:
+                  - bbmigration
+          - Effect: Allow
+            Action:
+              - ssm:StartSession
+            Resource:
+              - arn:aws:ssm:*:*:document/*
+          - Effect: Allow
+            Action:
+              - ssm:TerminateSession
+              - ssm:ResumeSession
+            Resource:
+              - 'arn:aws:ssm:*:*:session/${aws:username}*'
+              - 'arn:aws:ssm:*:*:session/${aws:userid}*'
+          - Effect: Allow 
+            Action: 
+              - 'ec2:Describe*' 
+              - 'ec2:List*'
+            Resource: '*'
+          # - Effect: Allow
+          #   Action: 
+          #     - 'ec2:StartInstances'
+          #     - 'ec2:StopInstances'
+          #     - 'ec2:CreateTags'
+          #     - 'ec2:DeleteTags'
+          #   Resource:
+          #     - !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+          #   Condition:
+          #     StringEquals:
+          #       aws:ResourceTag/application:
+          #         - your-org
+
+
+  BBMigrationUserParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/Shared-Role02"
+      Type: String
+      Value: !GetAtt BBMigrationUser.PermissionSetArn
+
+# TICKET-0000 / TICKET-0000 - JFrog Artifactory to AWS CodeArtifact migration.
+#
+# Temporary, self-expiring replacement for CloudAdmin on shared-services-prod. The
+# breakglass Okta Access Request only grants 24 hours and the migration needs ~15 days,
+# so this grants only what the migration touches: CodeArtifact, ECR, the artifact and
+# Terraform-state S3 buckets, the domain's KMS key, and the IAM policies/roles the
+# platform-aws-artifact repo creates.
+#
+# Three deliberate choices:
+#
+#   1. InlinePolicy, not CustomerManagedPolicyReferences. The platform-readable/write/admin
+#      policies that platform-aws-artifact creates do not exist in 100000000001 yet -- this
+#      permission set is what lets them be created. Referencing them would deadlock,
+#      because Identity Center fails to provision a customer-managed reference whose
+#      named policy is absent from the target account.
+#
+#   2. IAM scoped to `policy/platform-*` and `role/gha-platform-*` at the DEFAULT path, never
+#      /platform/*. The account guardrail Platform-Protectionv2 denies iam:Create*/Put*/Update*/
+#      Delete* on policy/platform/* and Attach*/Put*/Delete*/Detach* on role/platform/*, so
+#      anything created under that path could not be modified afterwards. The
+#      platform-aws-artifact modules name their resources to match.
+#
+#   3. The resource ARNs are scoped by the SharedServicesProdAccountId parameter, NOT by
+#      !Sub ${AWS::AccountId}. That pseudo-parameter resolves to the account this stack
+#      is deployed FROM (org-prod, 100000000005), not the account the permission set is
+#      later used IN, and Identity Center does no further substitution at assume time.
+#      Using it silently produced arn:aws:iam::100000000005:policy/platform-* and made every
+#      write an implicitDeny. See PR 102. Verify any ARN-scoped set here with:
+#        aws iam simulate-principal-policy --policy-source-arn <AWSReservedSSO role arn>
+#
+# Expiry is a single terminal Deny rather than a DateLessThan on each Allow: it cannot
+# be missed when a statement is added later, and Deny beats every Allow. Extend by
+# raising the date in a new PR, which keeps the extension on the record.
+  SSArtifactAdmin:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref SSOInstanceArn
+      Name: 'Shared-Role01'
+      Description: 'Temporary CodeArtifact/ECR admin for the Artifactory migration (TICKET-0000), expires 2026-09-30'
+      SessionDuration: 'PT4H'
+      InlinePolicy:
+        Version: '2012-10-17'
+        Statement:
+
+          # Terminal expiry. Keep this statement last so it reads as the backstop it is.
+          - Sid: ExpireAfterMigrationWindow
+            Effect: Deny
+            Action: '*'
+            Resource: '*'
+            Condition:
+              DateGreaterThan:
+                aws:CurrentTime: '2026-09-30T23:59:00Z'
+
+          - Sid: CodeArtifactBearerToken
+            Effect: Allow
+            Action:
+              - 'sts:GetServiceBearerToken'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                sts:AWSServiceName: 'codeartifact.amazonaws.com'
+
+          # ListDomains/ListRepositories are not resource-scopable, hence the split.
+          - Sid: CodeArtifactList
+            Effect: Allow
+            Action:
+              - 'codeartifact:ListDomains'
+              - 'codeartifact:ListRepositories'
+            Resource: '*'
+
+          # CreateDomain and CreateRepository are unscoped on purpose. They are also
+          # listed in the ARN-scoped statements below, but iam simulate-custom-policy
+          # returns implicitDeny for both against a matching domain/repository ARN
+          # while allowing DescribeDomain on that same ARN, i.e. it does not treat
+          # these two as resource-scopable. Whether that is a simulator gap or real
+          # IAM behaviour is unresolved, so they are granted here rather than risk a
+          # second failed round-trip for the requester. Blast radius is one-time
+          # creation within this account, and every destructive and read action stays
+          # ARN-scoped. Worth narrowing if the scoped form is ever confirmed to work.
+          - Sid: CodeArtifactCreate
+            Effect: Allow
+            Action:
+              - 'codeartifact:CreateDomain'
+              - 'codeartifact:CreateRepository'
+            Resource: '*'
+
+          - Sid: CodeArtifactDomainAdmin
+            Effect: Allow
+            Action:
+              - 'codeartifact:CreateDomain'
+              - 'codeartifact:DeleteDomain'
+              # No codeartifact:UpdateDomain -- that action does not exist. Domain
+              # changes go through PutDomainPermissionsPolicy or a recreate.
+              - 'codeartifact:DescribeDomain'
+              - 'codeartifact:GetAuthorizationToken'
+              - 'codeartifact:GetDomainPermissionsPolicy'
+              - 'codeartifact:PutDomainPermissionsPolicy'
+              - 'codeartifact:DeleteDomainPermissionsPolicy'
+              - 'codeartifact:ListRepositoriesInDomain'
+              - 'codeartifact:ListTagsForResource'
+              - 'codeartifact:TagResource'
+              - 'codeartifact:UntagResource'
+            Resource:
+              - !Sub 'arn:aws:codeartifact:*:${SharedServicesProdAccountId}:domain/platform-*'
+
+          - Sid: CodeArtifactRepositoryAdmin
+            Effect: Allow
+            Action:
+              - 'codeartifact:CreateRepository'
+              - 'codeartifact:DeleteRepository'
+              - 'codeartifact:UpdateRepository'
+              - 'codeartifact:DescribeRepository'
+              - 'codeartifact:GetRepositoryEndpoint'
+              - 'codeartifact:ReadFromRepository'
+              - 'codeartifact:ListPackages'
+              - 'codeartifact:GetRepositoryPermissionsPolicy'
+              - 'codeartifact:PutRepositoryPermissionsPolicy'
+              - 'codeartifact:DeleteRepositoryPermissionsPolicy'
+              - 'codeartifact:AssociateExternalConnection'
+              - 'codeartifact:DisassociateExternalConnection'
+              # Required for the upstream chaining in codeartifact-tiered
+              # (public-store -> org -> team). Without it the upstreams silently
+              # cannot be set.
+              - 'codeartifact:AssociateWithDownstreamRepository'
+              - 'codeartifact:ListTagsForResource'
+              - 'codeartifact:TagResource'
+              - 'codeartifact:UntagResource'
+            Resource:
+              - !Sub 'arn:aws:codeartifact:*:${SharedServicesProdAccountId}:repository/platform-*/*'
+
+          # CodeArtifact scopes these to package/ ARNs, which are a different resource
+          # type from repository/ ARNs -- a repository-scoped Resource silently denies
+          # PublishPackageVersion.
+          - Sid: CodeArtifactPackageAdmin
+            Effect: Allow
+            Action:
+              - 'codeartifact:PublishPackageVersion'
+              - 'codeartifact:PutPackageMetadata'
+              - 'codeartifact:DescribePackage'
+              - 'codeartifact:DescribePackageVersion'
+              - 'codeartifact:ListPackageVersions'
+              - 'codeartifact:ListPackageVersionAssets'
+              - 'codeartifact:ListPackageVersionDependencies'
+              - 'codeartifact:GetPackageVersionAsset'
+              - 'codeartifact:GetPackageVersionReadme'
+              - 'codeartifact:DeletePackage'
+              - 'codeartifact:DeletePackageVersions'
+              - 'codeartifact:UpdatePackageVersionsStatus'
+              - 'codeartifact:PutPackageOriginConfiguration'
+              - 'codeartifact:CopyPackageVersions'
+            Resource:
+              - !Sub 'arn:aws:codeartifact:*:${SharedServicesProdAccountId}:package/platform-*/*'
+
+          # CreateKey and ListKeys/ListAliases cannot be resource-scoped. The
+          # destructive key operations are scoped by tag in the statement after.
+          # KMS is split by risk, not by tag. An earlier version gated the whole key
+          # lifecycle on aws:ResourceTag/Stack, which deadlocks: kms:TagResource was
+          # itself inside the gated statement, so Terraform could not apply the tag that
+          # the condition required, and the key could not be created or even refreshed.
+          # A tag-based condition can never gate the act of tagging.
+          #
+          # So: creation, every read, alias management, tagging and rotation are
+          # unconditioned; the destructive, cryptographic and grant operations stay gated
+          # on the tag, which is what actually matters in an account holding other CMKs.
+          #
+          # Accepted residual risk, called out rather than buried: unconditioned
+          # kms:TagResource lets this role tag any CMK in the account Stack=platform-artifact
+          # and thereby reach the gated operations on it. That takes deliberate misuse,
+          # the grant lasts 14 days, and the alternative deadlocks. The clean end state is
+          # to replace the tag condition with the artifact key's own ARN once it exists.
+          - Sid: KmsBootstrapAndRead
+            Effect: Allow
+            Action:
+              - 'kms:CreateKey'
+              - 'kms:ListKeys'
+              - 'kms:DescribeKey'
+              - 'kms:ListResourceTags'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:GetKeyPolicy'
+              - 'kms:ListKeyPolicies'
+              - 'kms:GetKeyRotationStatus'
+              - 'kms:EnableKeyRotation'
+              - 'kms:ListAliases'
+              - 'kms:CreateAlias'
+              - 'kms:UpdateAlias'
+              - 'kms:DeleteAlias'
+            Resource: '*'
+
+          # CreateGrant/ListGrants/RevokeGrant are here because CodeArtifact creates a
+          # grant on the CMK when the domain is created. EnableKey/DisableKey are here
+          # because aws_kms_key exposes is_enabled.
+          - Sid: KmsManageArtifactKey
+            Effect: Allow
+            Action:
+              - 'kms:PutKeyPolicy'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+              - 'kms:EnableKey'
+              - 'kms:DisableKey'
+              - 'kms:Decrypt'
+              - 'kms:GenerateDataKey'
+              - 'kms:CreateGrant'
+              - 'kms:ListGrants'
+              - 'kms:RevokeGrant'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:ResourceTag/Stack: 'platform-artifact'
+
+          - Sid: EcrAuthAndList
+            Effect: Allow
+            Action:
+              - 'ecr:GetAuthorizationToken'
+              - 'ecr:DescribeRegistry'
+              - 'ecr:DescribeRepositories'
+            Resource: '*'
+
+          - Sid: EcrRepositoryAdmin
+            Effect: Allow
+            Action:
+              - 'ecr:CreateRepository'
+              - 'ecr:DeleteRepository'
+              - 'ecr:PutLifecyclePolicy'
+              - 'ecr:GetLifecyclePolicy'
+              - 'ecr:DeleteLifecyclePolicy'
+              - 'ecr:PutImageTagMutability'
+              - 'ecr:PutImageScanningConfiguration'
+              - 'ecr:SetRepositoryPolicy'
+              - 'ecr:GetRepositoryPolicy'
+              - 'ecr:DeleteRepositoryPolicy'
+              - 'ecr:TagResource'
+              - 'ecr:UntagResource'
+              - 'ecr:ListTagsForResource'
+              - 'ecr:BatchCheckLayerAvailability'
+              - 'ecr:GetDownloadUrlForLayer'
+              - 'ecr:BatchGetImage'
+              - 'ecr:DescribeImages'
+              - 'ecr:ListImages'
+              - 'ecr:InitiateLayerUpload'
+              - 'ecr:UploadLayerPart'
+              - 'ecr:CompleteLayerUpload'
+              - 'ecr:PutImage'
+              - 'ecr:BatchDeleteImage'
+            Resource:
+              - !Sub 'arn:aws:ecr:*:${SharedServicesProdAccountId}:repository/platform-*'
+
+          # Deliberately NOT arn:aws:s3:::platform-* -- that prefix already matches 21
+          # unrelated buckets in this account, including platform-core-services-state-file-prod
+          # and platform-100000000001-cloudtrail-logs.
+          # Bucket-level and object-level actions are split onto their own ARN shapes
+          # rather than sharing one Resource list. A bucket ARN ending in `*` also
+          # lexically matches object ARNs, which Access Analyzer flags as redundant
+          # and which would grant bucket actions on object ARNs and vice versa.
+          - Sid: S3ArtifactAndStateBuckets
+            Effect: Allow
+            Action:
+              - 's3:CreateBucket'
+              - 's3:DeleteBucket'
+              - 's3:ListBucket'
+              - 's3:ListBucketVersions'
+              - 's3:ListBucketMultipartUploads'
+              - 's3:GetBucket*'
+              - 's3:PutBucket*'
+              - 's3:GetEncryptionConfiguration'
+              - 's3:PutEncryptionConfiguration'
+              - 's3:GetLifecycleConfiguration'
+              - 's3:PutLifecycleConfiguration'
+            Resource:
+              - 'arn:aws:s3:::platform-aws-artifact-*'
+              - 'arn:aws:s3:::platform-artifact-*'
+
+          - Sid: S3ArtifactAndStateObjects
+            Effect: Allow
+            Action:
+              - 's3:GetObject*'
+              - 's3:PutObject*'
+              - 's3:DeleteObject*'
+              - 's3:AbortMultipartUpload'
+              - 's3:ListMultipartUploadParts'
+            Resource:
+              - 'arn:aws:s3:::platform-aws-artifact-*/*'
+              - 'arn:aws:s3:::platform-artifact-*/*'
+
+          - Sid: S3ListAllBucketsForConsole
+            Effect: Allow
+            Action:
+              - 's3:ListAllMyBuckets'
+              - 's3:GetBucketLocation'
+            Resource: '*'
+
+          - Sid: IamPolicyManage
+            Effect: Allow
+            Action:
+              - 'iam:CreatePolicy'
+              - 'iam:DeletePolicy'
+              - 'iam:CreatePolicyVersion'
+              - 'iam:DeletePolicyVersion'
+              - 'iam:SetDefaultPolicyVersion'
+              - 'iam:TagPolicy'
+              - 'iam:UntagPolicy'
+            # Two naming conventions, because two different modules create these.
+            #
+            #   platform-*             human-access-policies (platform-readable/write/admin) and
+            #                      gha-terraform-deploy-role (platform-iam-deploy-read/write),
+            #                      both in platform-aws-artifact itself.
+            #
+            #   ecr-platform-*-access  the shared platform-infra-catalog module
+            #                      terraform-modules/aws/artifact-repositories, whose
+            #                      aws_iam_policy.ecr_access is named
+            #                      "ecr-${replace(each.key, "/", "-")}-access". The ECR
+            #                      repository scope below is platform-*, so every repo name
+            #                      this role can create yields ecr-platform-<name>-access.
+            Resource:
+              - !Sub 'arn:aws:iam::${SharedServicesProdAccountId}:policy/platform-*'
+              - !Sub 'arn:aws:iam::${SharedServicesProdAccountId}:policy/ecr-platform-*-access'
+
+          - Sid: IamRoleManage
+            Effect: Allow
+            Action:
+              - 'iam:CreateRole'
+              - 'iam:DeleteRole'
+              - 'iam:UpdateRole'
+              - 'iam:UpdateAssumeRolePolicy'
+              - 'iam:AttachRolePolicy'
+              - 'iam:DetachRolePolicy'
+              - 'iam:PutRolePolicy'
+              - 'iam:DeleteRolePolicy'
+              - 'iam:TagRole'
+              - 'iam:UntagRole'
+              - 'iam:PassRole'
+            Resource:
+              - !Sub 'arn:aws:iam::${SharedServicesProdAccountId}:role/gha-platform-*'
+
+          # Read-only. Needed for terraform plan and to look up the existing GitHub
+          # OIDC provider by ARN -- creating one is denied account-wide by
+          # Platform-Protectionv2, and the provider already exists here.
+          - Sid: IamReadOnly
+            Effect: Allow
+            Action:
+              - 'iam:Get*'
+              - 'iam:List*'
+              - 'iam:SimulatePrincipalPolicy'
+              - 'iam:SimulateCustomPolicy'
+            Resource: '*'
+
+          - Sid: ReadOnlyContext
+            Effect: Allow
+            Action:
+              - 'sts:GetCallerIdentity'
+              - 'tag:Get*'
+              - 'cloudtrail:LookupEvents'
+            Resource: '*'
+
+  SSArtifactAdminParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${SSMPrefix}/Shared-Role01"
+      Type: String
+      Value: !GetAtt SSArtifactAdmin.PermissionSetArn

@@ -1,0 +1,33 @@
+template:
+  type: file
+  path: assignments.yaml.j2
+dependencies:
+  - core/permission-sets.yaml
+on_failure: ROLLBACK
+parameters:
+    SSMPrefix: "/platform/sso/permissionsets/org"
+    SSOInstanceArn: {{ environment_variable.SSOINSTANCEARN }}
+    SSOInstanceId: {{ environment_variable.SSOINSTANCEID }}
+    AssignmentFunction: !ssm /platform/sso/permissionsets/org/AssignmentsFunction
+sceptre_user_data:
+  Assignments:
+    - name: 'nonp-group-09'
+      account: '100000000225'
+      permission: "CloudAdmin"
+    - name: 'nonp-group-12'
+      account: '100000000225'
+      permission: "SecurityReadOnly"
+    - name: 'nonp-group-08'
+      account: '100000000225'
+      permission: "BillingReadOnly"
+    - name: 'nonp-group-07'
+      account: '100000000225'
+      permission: "BillingAdmin"
+    - name: 'nonp-group-10'
+      account: '100000000225'
+      permission: "CloudReadOnly"
+
+    # example-label-230
+    - name: 'nonp-group-11'
+      account: '100000000226'
+      permission: "CloudAdmin"

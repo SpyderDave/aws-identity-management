@@ -1,0 +1,7 @@
+parameters:
+    SSMPrefix: "/platform/sso/permissionsets"
+    SSOInstanceArn: {{ environment_variable.SSOINSTANCEARN }}  
+    SSOInstanceId: {{environment_variable.SSOINSTANCEID}}
+
+    #AssignmentFunction: !stack_output core/ssofunctions.yaml::AssignmentFunction
+    

@@ -1,0 +1,3 @@
+stack_tags:
+    application: sso 
+    role: org-prod
